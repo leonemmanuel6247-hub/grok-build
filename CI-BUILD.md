@@ -1,61 +1,48 @@
-# Compilation du binaire `xai-grok-pager` en CI (GitHub Actions)
+# Compilation 32-bit (i686) du binaire `xai-grok-pager` — Debian 12
 
-Ce dépôt est une copie de [`xai-org/grok-build`](https://github.com/xai-org/grok-build)
-(Apache-2.0) à laquelle on a ajouté le workflow
-[`.github/workflows/build.yml`](.github/workflows/build.yml) qui compile le binaire
-en **x86_64-unknown-linux-gnu**.
+Cible : machine **32-bit** (HP Pavilion dv1000, 2 Go RAM) sous **Debian 12 (i386, glibc 2.36)**.
 
-> Remplace simplement les sources par ta version adaptée (NemApi, etc.) :
-> copie `.github/workflows/build.yml` dans ton projet local, puis
-> `git push --force` — le workflow reste valable tel quel.
+Le workflow [`.github/workflows/build.yml`](.github/workflows/build.yml) produit un binaire
+`xai-grok-pager` **ELF 32-bit i686**, directement exécutable sur cette machine.
 
-## Ce que fait le workflow
+## Choix techniques
 
-| Étape | Détail |
+| Point | Décision |
 |---|---|
-| Déclencheurs | `push`, `workflow_dispatch` (bouton *Run workflow*) |
-| Runner | `ubuntu-latest` (x86_64) |
-| Toolchain | Rust **1.94.0** via `dtolnay/rust-toolchain@stable`, target `x86_64-unknown-linux-gnu` |
-| Système | `pkg-config libssl-dev protobuf-compiler cmake build-essential perl unzip` |
-| protoc | **29.3** téléchargé depuis les releases protobuf, installé dans `/opt/protoc`, `PROTOC=/opt/protoc/bin/protoc` (celui de l'OS est ignoré) |
-| Mémoire | swap 8 G, `CARGO_INCREMENTAL=0`, `CARGO_BUILD_JOBS=4`, `RUSTFLAGS="-C codegen-units=1 -C force-unwind-tables=yes"` |
-| Commande | `cargo build --release -p xai-grok-pager-bin --target x86_64-unknown-linux-gnu --no-default-features --features stock,sandbox-enforce` |
-| Sortie | artefact `xai-grok-pager` (= `target/x86_64-unknown-linux-gnu/release/xai-grok-pager`) |
+| Cible | `i686-unknown-linux-gnu` (un binaire x86_64 ne démarrerait pas sur ce CPU) |
+| Runner | `ubuntu-latest` + `container: debian:12` → le binaire est lié à **glibc 2.36**, exactement celle de la machine cible |
+| Multilib | `gcc-multilib` + `libc6-dev-i386` (le runner est x86_64), contrôlé par un `gcc -m32` |
+| `fastant` | **0.1.10 ne compile pas en 32-bit** ; `Cargo.lock` est épinglé sur **0.1.11** (correctif amont) |
+| protoc | **29.3** téléchargé depuis protobuf/releases, `PROTOC=/opt/protoc/bin/protoc` (le wrapper DotSlash du dépôt n'est pas installé) |
+| Mémoire build | `CARGO_INCREMENTAL=0`, `CARGO_BUILD_JOBS=2`, `RUSTFLAGS="-C codegen-units=1 -C force-unwind-tables=yes"` |
+| Commande | `cargo build --release -p xai-grok-pager-bin --target i686-unknown-linux-gnu --no-default-features --features stock,sandbox-enforce` |
+| Sortie | artefact `xai-grok-pager-i686-debian12` (binaire strippé) |
 
-## Pourquoi x86_64 et pas i686 ?
+La cible du dépôt (`.cargo/config.toml`) est écrasée deux fois : `CARGO_BUILD_TARGET` (env)
+et `--target` (CLI, prioritaire).
 
-La cible d'origine du dépôt est `i686-unknown-linux-gnu` (32-bit), d'où :
-
-- `fastant` ne compile pas en 32-bit (`core::arch::x86_64` est absent) ;
-- les runners GitHub Actions sont des x86_64 (le build 32-bit exigerait un toolchain
-  multilib) ;
-- le 64-bit est plus rapide et nettement moins gourmand.
-
-Le workflow **surcharge** donc la cible de deux façons (la CLI gagne sur le fichier de
-config) :
-
-1. variable `CARGO_BUILD_TARGET: x86_64-unknown-linux-gnu` ;
-2. option `--target x86_64-unknown-linux-gnu` sur la ligne de commande.
-
-Si ton `.cargo/config.toml` contient `[build] target = "i686-unknown-linux-gnu"`, rien
-à changer : c'est écrasé.
-
-## Récupérer le binaire
-
-1. Onglet **Actions** → run **Build xai-grok-pager (x86_64)**.
-2. Section **Artifacts** → télécharger `xai-grok-pager`.
+## Récupérer et lancer le binaire
 
 ```bash
-unzip xai-grok-pager.zip
+unzip xai-grok-pager-i686-debian12.zip
 chmod +x xai-grok-pager
 ./xai-grok-pager --version
+grep -m1 -o sse2 /proc/cpuinfo   # vérifier SSE2 (cible i686 par défaut = pentium4)
 ```
 
-## Rappels
+Avec 2 Go de RAM, prévoir un swap :
 
-- `bin/protoc` du dépôt est un wrapper **DotSlash** (protoc 29.3). Le workflow n'installe
-  pas `dotslash` : il fournit directement `PROTOC`, qui est prioritaire (cf.
-  `crates/build/xai-proto-build/src/find_protoc.rs`).
-- Le workspace de travail reste sur ta machine (NemApi en local) : la CI ne fait que
-  produire le binaire.
-- Si le job meurt en OOM : passe `CARGO_BUILD_JOBS` à `2` (voir `env:` du workflow).
+```bash
+sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+```
+
+## Dépannage
+
+| Symptôme | Cause | Solution |
+|---|---|---|
+| `error[E0432]: could not find x86_64 in arch` | `fastant` < 0.1.11 | déjà corrigé dans `Cargo.lock` |
+| `aws-lc-sys` ne compile pas | AWS-LC est mal supporté en x86 32-bit | remplacer `features = ["aws-lc-rs"]` par `["ring"]` (rustls) et `tls-aws-lc` par `tls-ring` (tonic) |
+| `openssl-sys` / `-lssl` introuvable | OpenSSL requis en 32-bit | `dpkg --add-architecture i386 && apt-get install libssl-dev:i386` |
+| `GLIBC_2.xx not found` | build hors Debian 12 | garder `container: debian:12` |
+| `Illegal instruction` | CPU sans SSE2 | ajouter `-C target-cpu=pentium3` aux `RUSTFLAGS` |
+| Job tué (OOM) | trop de jobs | `CARGO_BUILD_JOBS: '1'` |

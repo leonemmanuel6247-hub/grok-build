@@ -3263,9 +3263,9 @@ dependencies = [
 
 [[package]]
 name = "fastant"
-version = "0.1.10"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62bf7fa928ce0c4a43bd6e7d1235318fc32ac3a3dea06a2208c44e729449471a"
+checksum = "2e825441bfb2d831c47c97d05821552db8832479f44c571b97fededbf0099c07"
 dependencies = [
  "small_ctor",
  "web-time",

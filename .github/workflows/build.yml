@@ -1,14 +1,15 @@
-name: Build xai-grok-pager (x86_64)
+name: Build xai-grok-pager (i686 32-bit, Debian 12)
 
-# Compile le binaire `xai-grok-pager` en CI pour une cible 64-bit.
-# Le workspace/app tourne sur la machine hôte (NemApi en local) : ce workflow ne
-# sert qu'à produire un binaire fiable, reproductible et téléchargeable.
+# Compile le binaire `xai-grok-pager` pour une machine 32-bit (i686)
+# tournant sous Debian 12 (HP Pavilion dv1000 : 2 Go RAM, Debian 12 i386).
 #
-# Pourquoi x86_64 et pas i686 ?
-#   - la cible d'origine du dépôt (i686-unknown-linux-gnu, 32-bit) casse sur la
-#     dépendance `fastant`, qui utilise core::arch::x86_64 (inexistant en 32-bit) ;
-#   - les runners GitHub Actions sont des x86_64 : pas de multilib à installer ;
-#   - le build 64-bit est plus rapide et consomme moins de mémoire par unité.
+# Points clés :
+#   - cible i686-unknown-linux-gnu (PAS x86_64 : la machine ne sait pas exécuter du 64-bit)
+#   - build DANS un conteneur debian:12 -> le binaire est lié à glibc 2.36,
+#     exactement comme le système cible (un build sur ubuntu-latest exigerait
+#     une glibc plus récente et ne démarrerait pas sur Debian 12)
+#   - `fastant` 0.1.10 ne compile pas en 32-bit (cf. étape « Correctif fastant »)
+#   - protoc 29.3 explicite (le wrapper DotSlash n'est pas utilisé)
 
 on:
   push:
@@ -18,112 +19,138 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-${{ github.ref }}
+  group: build-i686-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
-  # Pas de compilation incrémentale en CI (réduit l'usage disque/mémoire, cache plus propre).
+  # CI : pas d'incrémental (moins de disque/RAM, cache plus fiable)
   CARGO_INCREMENTAL: '0'
-  # Nombre de jobs cargo : 4 = valeur raisonnable sur un runner 4 vCPU.
-  # Si le runner OOM (aws-lc-sys, xai-grok-shell), descendre à 2.
-  CARGO_BUILD_JOBS: '4'
-  # Surcharge la cible forcée par .cargo/config.toml ([build] target = i686-...).
-  # L'option CLI --target ci-dessous a de toute façon la priorité.
-  CARGO_BUILD_TARGET: x86_64-unknown-linux-gnu
-  # Codegen en une seule unité : moins de pics mémoire à l'édition de liens,
-  # binaire un peu plus rapide. On répète force-unwind-tables car RUSTFLAGS
-  # remplace les rustflags du .cargo/config.toml pour cette cible.
-  RUSTFLAGS: '-C codegen-units=1 -C force-unwind-tables=yes'
-  # protoc 29.3 imposé (celui du dépôt via bin/protoc/DotSlash, pas celui de l'OS).
+  # 2 jobs suffisent : les runners ont peu de RAM par rapport aux gros crates
+  # (aws-lc-sys, libgit2-sys, xai-grok-shell). Monter à 4 si le runner suit.
+  CARGO_BUILD_JOBS: '2'
+  # Surcharge la cible forcée par .cargo/config.toml (i686/EABI ou autre)
+  CARGO_BUILD_TARGET: i686-unknown-linux-gnu
+  # protoc 29.3 imposé : c'est celui que le dépôt attend (bin/protoc, DotSlash)
   PROTOC: /opt/protoc/bin/protoc
+  # RUSTFLAGS remplace les rustflags de .cargo/config.toml pour cette cible :
+  # on garde force-unwind-tables (backtraces) + codegen-units=1 (moins de pics RAM).
+  RUSTFLAGS: '-C codegen-units=1 -C force-unwind-tables=yes'
+  CARGO_NET_RETRY: '5'
+  CARGO_HTTP_TIMEOUT: '60'
 
 jobs:
-  build:
-    name: cargo build (release, x86_64-unknown-linux-gnu)
+  build-i686:
+    name: cargo build release (i686-unknown-linux-gnu, Debian 12)
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    container: debian:12          # glibc 2.36 = celle de la machine cible
+    timeout-minutes: 180
 
     steps:
+      - name: Outils de base (conteneur Debian 12)
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git unzip xz-utils file
+
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Libérer de l'espace disque
+      - name: Dépendances système (dont multilib 32-bit)
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/share/boost /usr/share/swift /opt/ghc 2>/dev/null || true
-          df -h /
+          apt-get install -y --no-install-recommends \
+            build-essential gcc-multilib libc6-dev-i386 \
+            pkg-config libssl-dev protobuf-compiler \
+            cmake perl
+          # Preuve que l'hôte sait produire du 32-bit :
+          echo 'int main(void){return 0;}' > /tmp/t.c
+          gcc -m32 /tmp/t.c -o /tmp/t32 && file /tmp/t32
 
-      - name: Installer Rust 1.94.0 (+ target x86_64)
+      - name: Installer Rust 1.94.0 + cible i686
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.94.0
-          targets: x86_64-unknown-linux-gnu
+          targets: i686-unknown-linux-gnu
 
-      - name: Dépendances système
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            pkg-config libssl-dev protobuf-compiler cmake build-essential perl unzip curl ca-certificates
-          protoc --version || true   # celui de l'OS : volontairement écrasé plus bas
-
-      - name: Installer protoc 29.3 (celui du dépôt, pas celui de l'OS)
+      - name: Installer protoc 29.3
         run: |
           set -euo pipefail
           curl -fsSL -o /tmp/protoc.zip \
             https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
-          sudo rm -rf /opt/protoc
-          sudo mkdir -p /opt/protoc
-          sudo unzip -oq /tmp/protoc.zip -d /opt/protoc
-          sudo chmod +x /opt/protoc/bin/protoc
+          rm -rf /opt/protoc && mkdir -p /opt/protoc
+          unzip -oq /tmp/protoc.zip -d /opt/protoc
+          chmod +x /opt/protoc/bin/protoc
           echo "/opt/protoc/bin" >> "$GITHUB_PATH"
           /opt/protoc/bin/protoc --version
-          ls /opt/protoc/include/google/protobuf/descriptor.proto
+          test -f /opt/protoc/include/google/protobuf/descriptor.proto
 
-      - name: Ajouter de la swap (évite l'OOM sur les gros crates)
+      - name: Correctif fastant (32-bit)
         run: |
-          sudo fallocate -l 8G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=8192
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
-          free -h
+          # fastant <= 0.1.10 utilise `core::arch::x86_64::__cpuid` alors que son
+          # cfg autorise aussi target_arch = "x86" -> E0432 « could not find
+          # x86_64 in arch » sur i686. Corrigé en amont en 0.1.11.
+          set -euo pipefail
+          grep -q 'name = "fastant"' Cargo.lock
+          current=$(grep -A1 'name = "fastant"' Cargo.lock | sed -n 's/.*version = "\(.*\)"/\1/p')
+          echo "fastant actuel : $current"
+          if [ "$current" != "0.1.11" ]; then
+            cargo update -p fastant --precise 0.1.11
+          fi
+          grep -A1 'name = "fastant"' Cargo.lock
 
-      - name: Cache cargo (registry + target)
+      - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          prefix-key: v1-x86_64
-          workspaces: '. -> target'
-          # La cible est dans le nom du dossier de cache : évite de réutiliser un cache i686.
-          key: x86_64-unknown-linux-gnu
+          prefix-key: v1-i686
+          key: i686-unknown-linux-gnu-debian12
           cache-on-failure: true
 
-      - name: Diagnostic cible
+      - name: Diagnostic
         run: |
           rustc -vV
           cargo --version
           protoc --version
           echo "CARGO_BUILD_TARGET=$CARGO_BUILD_TARGET"
-          echo '--- cible forcée par le dépôt (si présente) ---'
-          grep -n -A3 '^\[build\]' .cargo/config.toml || echo 'aucune section [build] dans .cargo/config.toml'
+          echo '--- cible forcée par le dépôt, si présente ---'
+          grep -n -A3 '^\[build\]' .cargo/config.toml || echo 'pas de section [build]'
+          df -h /
 
-      - name: cargo build --release
+      - name: cargo build --release (i686)
         run: |
           cargo build --release \
             -p xai-grok-pager-bin \
-            --target x86_64-unknown-linux-gnu \
+            --target i686-unknown-linux-gnu \
             --no-default-features --features stock,sandbox-enforce
 
-      - name: Vérifier le binaire
+      - name: Vérifier le binaire (ELF 32-bit)
         run: |
           set -euo pipefail
-          BIN=target/x86_64-unknown-linux-gnu/release/xai-grok-pager
+          BIN=target/i686-unknown-linux-gnu/release/xai-grok-pager
           ls -lh "$BIN"
           file "$BIN"
-          ldd "$BIN" | head -20 || true
+          file "$BIN" | grep -q 'ELF 32-bit' || { echo "::error::Le binaire n'est pas en 32-bit"; exit 1; }
+          readelf -h "$BIN" | grep -E 'Class|Machine'
+          ldd "$BIN" || true
 
-      - name: Upload de l'artefact
+      - name: Test de démarrage rapide (informatif)
+        run: |
+          BIN=target/i686-unknown-linux-gnu/release/xai-grok-pager
+          "$BIN" --version || echo "::warning::--version a échoué (binaire dynamique : normal si les libs i386 manquent)"
+
+      - name: Préparer l'artefact
+        run: |
+          set -euo pipefail
+          BIN=target/i686-unknown-linux-gnu/release/xai-grok-pager
+          mkdir -p dist
+          cp "$BIN" dist/xai-grok-pager
+          strip --strip-unneeded dist/xai-grok-pager || true
+          ls -lh dist/xai-grok-pager
+          file dist/xai-grok-pager
+
+      - name: Upload de l'artefact (32-bit)
         uses: actions/upload-artifact@v4
         with:
-          name: xai-grok-pager
-          path: target/x86_64-unknown-linux-gnu/release/xai-grok-pager
+          name: xai-grok-pager-i686-debian12
+          path: dist/xai-grok-pager
           if-no-files-found: error
           retention-days: 30

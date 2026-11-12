@@ -442,14 +442,15 @@ fn cap_child_address_space() {
             return;
         }
         // Respect any existing (lower) hard limit; never raise it
-        // `rlim_t` is `u64` on Linux, so the cap const needs no cast
-        let cap = if lim.rlim_max == libc::RLIM_INFINITY {
+        // PATCH 32-bit : `rlim_t` n'est `u64` que sur 64-bit ; sur i686 c'est un
+        // `u32`. On normalise tout en u64 puis on redescend au type de rlim_t.
+        let cap: u64 = if lim.rlim_max == libc::RLIM_INFINITY {
             CHILD_ADDRESS_SPACE_CAP_BYTES
         } else {
-            CHILD_ADDRESS_SPACE_CAP_BYTES.min(lim.rlim_max)
+            CHILD_ADDRESS_SPACE_CAP_BYTES.min(lim.rlim_max as u64)
         };
-        if lim.rlim_cur == libc::RLIM_INFINITY || lim.rlim_cur > cap {
-            lim.rlim_cur = cap;
+        if lim.rlim_cur == libc::RLIM_INFINITY || lim.rlim_cur as u64 > cap {
+            lim.rlim_cur = cap as libc::rlim_t;
             let _ = libc::setrlimit(libc::RLIMIT_AS, &lim);
         }
     }

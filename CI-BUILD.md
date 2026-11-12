@@ -57,6 +57,7 @@ sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapf
 | idem | `EXPECTED_ARCH` valait **0** pour toute architecture ≠ x86_64/aarch64 : le portail seccomp aurait refusé **tous** les syscalls de l'enfant. Ajout de `AUDIT_ARCH_I386 = 0x4000_0003` |
 | `crates/codegen/xai-grok-shell-base/src/cpu_profile.rs` | `pprof 0.15` ne fournit `ProfilerGuardBuilder::blocklist()` que pour x86_64/aarch64/riscv64/loongarch64 → `E0599` sur i686. L'appel est conditionné à ces architectures |
 | `crates/codegen/xai-grok-shell/src/util/limits.rs` | `libc::rlim_t` = `u32` sur i686 (u64 en 64-bit) → `E0308`. Cast explicite `as u64` |
+| `crates/codegen/xai-grok-pager/src/app/mermaid_worker.rs` | même cause : `RLIMIT_AS` comparé à `u64` alors que `rlim_t` = `u32` sur i686 → normalisation explicite en `u64` |
 | workflow : `GROK_TOOLS_BUNDLE_RG_PATH` + `GROK_SHELL_BUNDLE_RG_PATH` | le `build.rs` de `xai-grok-tools` n'a pas d'asset ripgrep pour `linux-x86` → on compile `ripgrep 15.0.0` pour i686 dans la CI et on le fournit via ces overrides officiels (les deux crates qui embarquent rg : tools et shell) (`fd`/`bfs`/`ugrep` ne sont embarqués que si leurs variables sont posées) |
 
 Ces patchs ne changent rien pour un build x86_64 : les blocs ajoutés sont sous `#[cfg(target_arch = "x86")]`.

@@ -46,3 +46,12 @@ sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapf
 | `GLIBC_2.xx not found` | build hors Debian 12 | garder `container: debian:12` |
 | `Illegal instruction` | CPU sans SSE2 | ajouter `-C target-cpu=pentium3` aux `RUSTFLAGS` |
 | Job tué (OOM) | trop de jobs | `CARGO_BUILD_JOBS: '1'` |
+
+## Patchs 32-bit appliqués dans ce dépôt
+
+| Patch | Pourquoi |
+|---|---|
+| `Cargo.lock` : `fastant` **0.1.11** | `0.1.10` importe `core::arch::x86_64::__cpuid` sous un cfg qui autorise aussi `x86` → `E0432` sur i686 (corrigé en amont) |
+| `third_party/patched/nono` + `[patch.crates-io]` | `nono 0.53.0` ne définit `SYS_OPENAT` / `SYS_OPENAT2` que pour `x86_64` et `aarch64` → `E0432` sur i686. On ajoute les numéros i386 (`__NR_openat = 295`, `__NR_openat2 = 437`) |
+
+Ces patchs ne changent rien pour un build x86_64 : les blocs ajoutés sont sous `#[cfg(target_arch = "x86")]`.

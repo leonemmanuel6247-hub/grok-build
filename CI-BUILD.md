@@ -55,6 +55,7 @@ sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapf
 | `third_party/patched/nono` + `[patch.crates-io]` | `nono 0.53.0` ne définit `SYS_OPENAT` / `SYS_OPENAT2` que pour `x86_64` et `aarch64` → `E0432` sur i686. On ajoute les numéros i386 (`__NR_openat = 295`, `__NR_openat2 = 437`) |
 | `crates/codegen/xai-grok-sandbox/src/child_net.rs` | `libc::SYS_accept` n'existe pas sur i386 (socketcall) → `E0432`. Remplacé par une règle inerte (`-1`) sur `x86` |
 | idem | `EXPECTED_ARCH` valait **0** pour toute architecture ≠ x86_64/aarch64 : le portail seccomp aurait refusé **tous** les syscalls de l'enfant. Ajout de `AUDIT_ARCH_I386 = 0x4000_0003` |
+| `crates/codegen/xai-grok-shell-base/src/cpu_profile.rs` | `pprof 0.15` ne fournit `ProfilerGuardBuilder::blocklist()` que pour x86_64/aarch64/riscv64/loongarch64 → `E0599` sur i686. L'appel est conditionné à ces architectures |
 | workflow : `GROK_TOOLS_BUNDLE_RG_PATH` | le `build.rs` de `xai-grok-tools` n'a pas d'asset ripgrep pour `linux-x86` → on compile `ripgrep 15.0.0` pour i686 dans la CI et on le fournit via cet override officiel (`fd`/`bfs`/`ugrep` ne sont embarqués que si leurs variables sont posées) |
 
 Ces patchs ne changent rien pour un build x86_64 : les blocs ajoutés sont sous `#[cfg(target_arch = "x86")]`.

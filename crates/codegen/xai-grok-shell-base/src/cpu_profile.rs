@@ -655,9 +655,18 @@ mod platform {
         frequency_hz: i32,
         svg_path: &Path,
     ) -> Result<Box<dyn ProfilerEngine>, ControlError> {
-        let guard = pprof::ProfilerGuardBuilder::default()
-            .frequency(frequency_hz)
-            .blocklist(&["libc", "libgcc", "pthread", "vdso"])
+        // PATCH 32-bit (CI i686) : `pprof 0.15` ne fournit `blocklist()` que pour
+        // x86_64 / aarch64 / riscv64 / loongarch64. Sur i686 on profile sans
+        // liste de blocage (simple filtre d'affichage, rien de fonctionnel).
+        let builder = pprof::ProfilerGuardBuilder::default().frequency(frequency_hz);
+        #[cfg(any(
+            target_arch = "x86_64",
+            target_arch = "aarch64",
+            target_arch = "riscv64",
+            target_arch = "loongarch64"
+        ))]
+        let builder = builder.blocklist(&["libc", "libgcc", "pthread", "vdso"]);
+        let guard = builder
             .build()
             .map_err(|err| {
                 ControlError::with_details(

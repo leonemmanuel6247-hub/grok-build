@@ -45,6 +45,11 @@ jobs:
     runs-on: ubuntu-latest
     container: debian:12          # glibc 2.36 = celle de la machine cible
     timeout-minutes: 180
+    # Dans un conteneur, le shell par défaut des `run:` est `sh` (dash) :
+    # `set -o pipefail` y est illégal -> on force bash.
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Outils de base (conteneur Debian 12)

@@ -120,6 +120,24 @@ jobs:
           key: i686-debian12-${{ matrix.slug }}
           cache-on-failure: true
 
+      - name: Cache ripgrep i686
+        id: cache-rg
+        uses: actions/cache@v4
+        with:
+          path: /tmp/rgroot
+          key: rg-i686-15.0.0-${{ matrix.slug }}
+
+      - name: Compiler ripgrep 15.0.0 pour i686
+        if: steps.cache-rg.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          # Le build script de xai-grok-tools ne connaît pas d'asset ripgrep pour
+          # linux-x86 ("Unsupported target for ripgrep bundling"): on compile le
+          # rg 15.0.0 attendu pour i686 et on le passe via l'override officiel.
+          cargo install ripgrep --version 15.0.0 --locked \
+            --target i686-unknown-linux-gnu --root /tmp/rgroot
+          file /tmp/rgroot/bin/rg
+
       - name: Diagnostic
         run: |
           rustc -vV
@@ -130,6 +148,8 @@ jobs:
           df -h /
 
       - name: cargo build --release (i686)
+        env:
+          GROK_TOOLS_BUNDLE_RG_PATH: /tmp/rgroot/bin/rg
         run: |
           cargo build --release \
             -p xai-grok-pager-bin \

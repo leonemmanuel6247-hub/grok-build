@@ -20,7 +20,11 @@ mod ns_lockdown {
     pub(super) const EXPECTED_ARCH: u32 = 0xc000_003e; // AUDIT_ARCH_X86_64
     #[cfg(target_arch = "aarch64")]
     pub(super) const EXPECTED_ARCH: u32 = 0xc000_00b7; // AUDIT_ARCH_AARCH64
-    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    // PATCH 32-bit (CI i686) : sans cette branche, EXPECTED_ARCH valait 0 et le
+    // portail d'architecture refusait *tous* les appels système du process enfant.
+    #[cfg(target_arch = "x86")]
+    pub(super) const EXPECTED_ARCH: u32 = 0x4000_0003; // AUDIT_ARCH_I386
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64", target_arch = "x86")))]
     pub(super) const EXPECTED_ARCH: u32 = 0;
 
     pub(super) const CLONE_NAMESPACE_BITS: u32 = (libc::CLONE_NEWNS as u32)
@@ -179,9 +183,16 @@ mod ns_lockdown {
 #[cfg(target_os = "linux")]
 fn child_network_blocked_syscalls() -> [u32; 11] {
     use libc::{
-        SYS_accept, SYS_accept4, SYS_bind, SYS_connect, SYS_io_uring_enter, SYS_io_uring_register,
+        SYS_accept4, SYS_bind, SYS_connect, SYS_io_uring_enter, SYS_io_uring_register,
         SYS_io_uring_setup, SYS_listen, SYS_sendmmsg, SYS_sendmsg, SYS_sendto,
     };
+    // PATCH 32-bit (CI i686) : sur x86 il n'existe pas de syscall `accept`
+    // (il est multiplexé via socketcall). -1 => 0xFFFF_FFFF ne correspond à
+    // aucun numéro d'appel système réel, la règle est donc inerte.
+    #[cfg(target_arch = "x86")]
+    const SYS_accept: i32 = -1;
+    #[cfg(not(target_arch = "x86"))]
+    use libc::SYS_accept;
     [
         SYS_connect as u32,
         SYS_bind as u32,

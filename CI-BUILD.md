@@ -15,8 +15,8 @@ Le workflow [`.github/workflows/build.yml`](.github/workflows/build.yml) produit
 | `fastant` | **0.1.10 ne compile pas en 32-bit** ; `Cargo.lock` est épinglé sur **0.1.11** (correctif amont) |
 | protoc | **29.3** téléchargé depuis protobuf/releases, `PROTOC=/opt/protoc/bin/protoc` (le wrapper DotSlash du dépôt n'est pas installé) |
 | Mémoire build | `CARGO_INCREMENTAL=0`, `CARGO_BUILD_JOBS=2`, `RUSTFLAGS="-C codegen-units=1 -C force-unwind-tables=yes"` |
-| Commande | `cargo build --release -p xai-grok-pager-bin --target i686-unknown-linux-gnu --no-default-features --features stock,sandbox-enforce` |
-| Sortie | artefact `xai-grok-pager-i686-debian12` (binaire strippé) |
+| Commande | `cargo build --release -p xai-grok-pager-bin --target i686-unknown-linux-gnu --no-default-features --features <stock OU stock,sandbox-enforce>` |
+| Sortie | artefacts `xai-grok-pager-i686-stock` (principal) et `xai-grok-pager-i686-stock-sandbox` (expérimental) |
 
 La cible du dépôt (`.cargo/config.toml`) est écrasée deux fois : `CARGO_BUILD_TARGET` (env)
 et `--target` (CLI, prioritaire).
@@ -53,5 +53,16 @@ sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapf
 |---|---|
 | `Cargo.lock` : `fastant` **0.1.11** | `0.1.10` importe `core::arch::x86_64::__cpuid` sous un cfg qui autorise aussi `x86` → `E0432` sur i686 (corrigé en amont) |
 | `third_party/patched/nono` + `[patch.crates-io]` | `nono 0.53.0` ne définit `SYS_OPENAT` / `SYS_OPENAT2` que pour `x86_64` et `aarch64` → `E0432` sur i686. On ajoute les numéros i386 (`__NR_openat = 295`, `__NR_openat2 = 437`) |
+| `crates/codegen/xai-grok-sandbox/src/child_net.rs` | `libc::SYS_accept` n'existe pas sur i386 (socketcall) → `E0432`. Remplacé par une règle inerte (`-1`) sur `x86` |
+| idem | `EXPECTED_ARCH` valait **0** pour toute architecture ≠ x86_64/aarch64 : le portail seccomp aurait refusé **tous** les syscalls de l'enfant. Ajout de `AUDIT_ARCH_I386 = 0x4000_0003` |
 
 Ces patchs ne changent rien pour un build x86_64 : les blocs ajoutés sont sous `#[cfg(target_arch = "x86")]`.
+
+## Deux variantes
+
+| Variante | Statut | À utiliser ? |
+|---|---|---|
+| `stock` | requise | **oui** — c'est le binaire à copier sur le dv1000 |
+| `stock,sandbox-enforce` | expérimentale (`continue-on-error`) | seulement si elle passe : le sandbox seccomp/Landlock est peu testé en 32-bit |
+
+Si le binaire `stock` tourne mais que tu veux le sandbox, compare les deux artefacts.

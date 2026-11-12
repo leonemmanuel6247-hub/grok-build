@@ -149,7 +149,10 @@ jobs:
 
       - name: cargo build --release (i686)
         env:
+          # Les build scripts de xai-grok-tools et xai-grok-shell embarquent rg ;
+          # aucun des deux ne connaît d'asset pour linux-x86.
           GROK_TOOLS_BUNDLE_RG_PATH: /tmp/rgroot/bin/rg
+          GROK_SHELL_BUNDLE_RG_PATH: /tmp/rgroot/bin/rg
         run: |
           cargo build --release \
             -p xai-grok-pager-bin \
